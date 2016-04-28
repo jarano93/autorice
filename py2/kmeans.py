@@ -11,31 +11,50 @@ seeds = [
         (127,127,255),(255,127,255),(127,255,255),(255,255,255)
     ]
 
-nRGB = namedtuple('nRGB',  ('n', 'rgb'))
-group = namedtuple('group', ('n', 'rgb', 'nRGBs'))
+# nRGB = namedtuple('nRGB',  ('n', 'rgb'))
+# group = namedtuple('group', ('n', 'rgb', 'nRGBs'))
+
+'''
+class NRGB:
+    def __init__(self, n, rgb):
+        self.n = n
+        self.rgb = rgb
+'''
+
+class Group:
+    def __init__(self, n, rgb, nrgbs):
+        self.n = n
+        self.rgb = rgb
+        self.nrgbs = nrgbs
 
 def getcolors(fName, portrait=True):
-    img = Image.opne(fName)
+    img = Image.open(fName)
     w0, h0 = img.size
     if portrait:
-        img = img.resize(200 * w0 / h0, 200)
+        img = img.resize((200 * w0 / h0, 200), Image.BILINEAR)
     else:
-        img = img.resize(200, 200 * h0 / w0)
+        img = img.resize((200, 200 * h0 / w0), Image.BILINEAR)
     w, h = img.size
     vals = []
     for n, rgb in img.getcolors(w * h):
-        vals.append(nRGB(n, np.array(rgb)))
+        vals.append((n, np.array(rgb)))
+    # print vals
     return vals
 
-def kmeans(colors, threshold=90, N=40):
+def kmeans(cvals, threshold=90, N=40, TOL=1e-1):
+    print 'running'
     group16 = []
+    rgb_old = []
     for i in xrange(len(seeds)):
-        group16.append(group(0, np.array(seeds[n]), []))
+        group16.append(Group(0, np.array(seeds[i]), []))
+        rgb_old.append(np.array(seeds[i]))
     # calulate average while assigning initial classes -- use as BG
     sum = np.zeros(3)
-    for col in colors:
-        rgb = col.rgb
-        num = col.n
+    num_rgb = 0
+    for col in cvals:
+        num = col[0]
+        rgb = col[1]
+        num_rgb += num
         sum += num * rgb
         min = la.norm(255 * np.ones(3))
         key = 0
@@ -44,11 +63,11 @@ def kmeans(colors, threshold=90, N=40):
             if norm < min:
                 min = norm
                 key = j
-        group16[key].nRGBs.append(col)
+        group16[key].nrgbs.append(col)
         group16[key].n += num
 
     # calculate background and foreground color
-    bg = np.around(sum / colors_len)
+    bg = np.around(sum / num_rgb)
     fg = 255 * np.ones(3) - bg
 
     # if bg & fg are too similar force fg to either black or white
@@ -58,62 +77,83 @@ def kmeans(colors, threshold=90, N=40):
         else:
             fg = np.zeros(3)
 
-    rgb_old = []
+    # rgb_old = []
     for n in xrange(N):
         rgb_new = []
         # calculate new averages
         for gr in group16:
-            new = np.zeros(3)
-            for key in gr.nRGBs:
-                new += key.n * key.rgb
-            new = np.around( new / gr.n)
-            gr.rgb = new
-            rgb_new.append(new)
-            gr.nRGBs = []
+            if gr.n == 0:
+                rgb_new.append(gr.rgb)
+            else:
+                new = np.zeros(3)
+                for key in gr.nrgbs:
+                    new += key[0] * key[1]
+                new = np.around( new / gr.n)
+                gr.rgb = new
+                rgb_new.append(new)
+                gr.nrgbs = []
+                gr.n = 0
 
         # if no change break
-        if rgb_old == rgb_new:
+        max_diff = 0
+        for i in xrange(len(rgb_new)):
+            norm = la.norm(rgb_old[i] - rgb_new[i])
+            if norm > max_diff:
+                max_diff = norm
+        print "%d: %f" % (n, max_diff)
+        if max_diff < TOL:
             break
 
+        # if np.array_equal(np.array(rgb_old), np.array(rgb_new)):
+            # print 'break %d' % (n)
+            # break
+
         # reassign groups using new averages
-        for col in colors:
+        for col in cvals:
             min = la.norm(255 * np.ones(3))
             key = 0
-            # BOOKMARK
             for j in xrange(len(group16)):
-                norm = la.norm(col.rgb - group16[j].rgb)
+                norm = la.norm(col[1] - group16[j].rgb)
                 if norm < min:
                     min = norm
                     key = j
-            group16[key].nRGBs.append(col)
+            group16[key].nrgbs.append(col)
+            group16[key].n += col[0]
 
         rgb_old = rgb_new
 
     # if a group has no points assign color to other nearest group
-    for gr1 in group16:
-        if gr1.n == 0:
-            min = la.norm(255 * np.ones(3))
-            color = gr1.rgb
-            for gr2 in group15:
-                if gr2.rgb == color:
-                    continue
-                norm = la.norm(gr1.rgb - gr2.rgb)
-                if norm < min:
-                    color = gr2.rgb
-            if la.norm(gr1.rgb - fg) < min:
-                color = fg
-            gr1.rgb = color
-
-    color_vals = [bg, fg]
     for i in xrange(len(group16)):
-        color_vals.append(group16[i].rgb)
+        if group16[i].n == 0:
+            min = la.norm(group16[i].rgb - fg)
+            color = fg
+            for j in xrange(len(group16)):
+                if i == j:
+                    continue
+                norm = la.norm(group16[i].rgb - group16[j].rgb)
+                if norm < min:
+                    min = norm
+                    color = group16[j].rgb
+            group16[i].rgb = color
 
+    color_vals = [rgb_to_hex(tuple(bg)), rgb_to_hex(tuple(fg))]
+    hex_vals = []
+    for i in xrange(len(group16)):
+        color_vals.append(rgb_to_hex(tuple(group16[i].rgb)))
+    # print color_vals
     return color_vals
 
+
+def rgb_to_hex(rgb):
+    return '#%02x%02x%02x' % rgb
+
+# deprecated
 def get_hex(rgb_list):
+    # print rgb_list
     hex_list = []
     for i in xrange(len(rgb_list)):
         r, g, b = int(rgb_list[i][0]), int(rgb_list[i][1]), int(rgb_list[i][2])
+        # print '#%02x%02x%02x' % (r,g,b)
         hex_list.append('#%02x%02x%02x' % (r, g, b))
     return hex_list
 
@@ -130,11 +170,9 @@ def colorscheme(imgName, outputDir="~/.config/colorschemes/"):
     # load image, get colors
     img_colors = getcolors(imgName)
     # run kmeans
-    colors = kmeans(img_colors)
-    #conver to hex
-    hex = kmeans(colors)
+    hexcolors = kmeans(img_colors)
     # print results -- IN SHELL pipe to colorscheme file (match name to imgName)
-    print_hex(hex)
+    print_hex(hexcolors)
 
 
 
