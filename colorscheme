@@ -1,0 +1,24 @@
+#!/bin/zsh
+readonly DIR=$(dirname $0)
+readonly PY=$DIR/py2
+if [ "$1" = "make" ]; then
+    for var in "$@"
+    do
+        if [ "$var" != "make" ]; then
+            zsh $DIR/zsh/create_scheme.zsh $var $PY
+        fi
+    done
+elif [ "$1" = "set" ]; then
+    zsh $DIR/zsh/set_scheme.zsh
+elif [ "$1" = "print" ]; then
+    if [ "$2" = "xfce4" ]; then
+        xfce4-terminal --color-table # tbh this is deprecated
+    else
+        zsh $DIR/zsh/print_colors.zsh
+    fi
+else
+    zsh $DIR/zsh/create_scheme.zsh $1 $PY
+    zsh $DIR/zsh/set_scheme.zsh
+    feh --bg-fill $1
+    # i3-msg restart
+fi
